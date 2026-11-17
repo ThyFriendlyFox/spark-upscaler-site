@@ -49,7 +49,7 @@ export function Stats({ stats, loading }: { stats: StatsResp | null; loading: bo
       delay={0.15}
       description={
         chunks.length
-          ? `${chunks.length} chunks from ${stats?.jobs.length ?? 0} jobs. Every finished chunk sharpens the estimates.`
+          ? `${chunks.length} chunk${chunks.length === 1 ? '' : 's'} from ${stats?.jobs.length ?? 0} job${stats?.jobs.length === 1 ? '' : 's'}. Every finished chunk sharpens the estimates.`
           : 'How long upscales take on the Spark, learned from your own runs.'
       }
     >

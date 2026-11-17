@@ -101,7 +101,7 @@ function BookingPicker({ L, onBooked }: { L: LabData; onBooked: () => void }) {
       <FieldGroup className="gap-5">
         <FieldSet>
           <FieldLegend variant="label">Night</FieldLegend>
-          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1" role="radiogroup" aria-label="Night">
+          <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Night">
             {nights.map((x, i) => {
               const on = i === night
               const name = i === 0 && x.open - Date.now() / 1000 < 20 * 3600 ? 'Tonight' : new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(x.open * 1000)
@@ -118,7 +118,7 @@ function BookingPicker({ L, onBooked }: { L: LabData; onBooked: () => void }) {
                     setError('')
                   }}
                   className={cn(
-                    'relative grid min-w-20 shrink-0 gap-0.5 rounded-lg border px-3 py-2 text-left text-xs transition-[color,background-color,border-color] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40',
+                    'relative grid min-w-0 gap-0.5 rounded-lg border px-2.5 py-2 text-left text-xs transition-[color,background-color,border-color] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40',
                     on ? 'border-foreground text-foreground' : 'text-muted-foreground hover:border-foreground/40 hover:text-foreground',
                   )}
                 >
@@ -270,7 +270,7 @@ export function SparkPanel({
             ) : (
               <>
                 {session && (
-                  <Item variant="outline" className="rounded-lg">
+                  <Item variant="outline" className="flex-wrap rounded-lg">
                     <ItemContent>
                       <ItemTitle>{session.starting ? 'Your Session Is Starting' : 'Your Session Is Running'}</ItemTitle>
                       <ItemDescription className="tabular-nums">
@@ -312,12 +312,12 @@ export function SparkPanel({
                         const when = `${fmtWhen().format(b.start * 1000)} to ${fmtHour().format(b.end * 1000)}`
                         return (
                           <li key={b.id}>
-                            <Item variant="outline" size="sm" className="rounded-lg">
+                            <Item variant="outline" size="sm" className="flex-wrap rounded-lg">
                               <ItemContent>
                                 <ItemTitle className="tabular-nums">{when}</ItemTitle>
-                                <ItemDescription>{hrs((b.end - b.start) / 3600)}{b.note ? ` · ${b.note}` : ''}</ItemDescription>
+                                <ItemDescription className="line-clamp-none">{hrs((b.end - b.start) / 3600)}{b.note ? ` · ${b.note}` : ''}</ItemDescription>
                               </ItemContent>
-                              <ItemActions>
+                              <ItemActions className="w-full justify-between sm:w-auto">
                                 <Badge variant={b.status === 'approved' || b.status === 'active' ? 'secondary' : 'outline'}>
                                   {b.status === 'pending' ? 'Waiting for a Chief' : b.status === 'active' ? 'Running' : b.status[0].toUpperCase() + b.status.slice(1)}
                                 </Badge>

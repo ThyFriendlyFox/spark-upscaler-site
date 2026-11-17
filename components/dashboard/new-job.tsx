@@ -188,13 +188,13 @@ export function NewJob({ fits, storageReady, onCreated }: { fits: FitSet | null;
         <AnimatePresence mode="wait" initial={false}>
           {file ? (
             <motion.div key="file" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}>
-              <Item variant="outline" className="rounded-lg">
+              <Item variant="outline" className="flex-wrap rounded-lg">
                 <ItemMedia variant="icon">
                   <FileVideo aria-hidden />
                 </ItemMedia>
                 <ItemContent className="min-w-0">
                   <ItemTitle className="w-full truncate">{file.name}</ItemTitle>
-                  <ItemDescription className="tabular-nums">
+                  <ItemDescription className="line-clamp-none tabular-nums">
                     {fmtBytes(file.size)}
                     {reading && ' · Reading…'}
                     {meta && ` · ${meta.width}×${meta.height} · ${meta.duration.toFixed(1)} s · ${meta.frames} frames · ${meta.fps} fps`}
