@@ -33,7 +33,7 @@ export function Guide({ s }: { s: GuideState }) {
     },
     {
       title: 'Download the Result',
-      body: 'Finished jobs get a Download button. Files are deleted after 14 days. If a session ends mid-job, it resumes next session from the last chunk.',
+      body: 'Finished videos stay on the Spark and download straight from it, so sign in to the Spark site first. If a session ends mid-job, it resumes next session from the last chunk.',
       done: s.done,
     },
   ]

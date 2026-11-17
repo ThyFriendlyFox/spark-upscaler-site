@@ -1,6 +1,6 @@
 import { deleteBlobs } from '@/lib/blob'
 import { HttpError, readJson, route } from '@/lib/http'
-import { deleteJob, mustGetJob, removeStatsForJob, saveJob } from '@/lib/store'
+import { addTrash, deleteJob, mustGetJob, removeStatsForJob, saveJob } from '@/lib/store'
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -41,6 +41,8 @@ export const DELETE = route<Ctx>(async (_req, { params }) => {
     throw new HttpError(400, 'Cancel the job first; the worker is still using its files')
   }
   await deleteBlobs([job.input.deleted ? '' : job.input.url, job.output?.url ?? ''])
+  // A result kept on the Spark is removed by the worker the next time it runs.
+  if (job.output?.path) await addTrash([job.output.path])
   await deleteJob(id)
   // Timing stats are kept on purpose: they are what the estimates learn from.
   return Response.json({ ok: true })

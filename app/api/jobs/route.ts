@@ -2,7 +2,7 @@ import { blobConfigured } from '@/lib/blob'
 import { estimateJob } from '@/lib/estimate'
 import { HttpError, readJson, route } from '@/lib/http'
 import { redisConfigured } from '@/lib/redis'
-import { sparkConfigured } from '@/lib/spark'
+import { sparkConfigured, sparkSiteUrl } from '@/lib/spark'
 import { getStats, getWorker, listJobs, newId, saveJob, type Job } from '@/lib/store'
 import { cleanMeta, cleanSettings } from '@/lib/validate'
 
@@ -20,9 +20,9 @@ function setup() {
 
 export const GET = route(async () => {
   const s = setup()
-  if (!s.redis) return Response.json({ setup: s, jobs: [], worker: null })
+  if (!s.redis) return Response.json({ setup: s, jobs: [], worker: null, sparkUrl: sparkSiteUrl() })
   const [jobs, worker] = await Promise.all([listJobs(), getWorker()])
-  return Response.json({ setup: s, jobs, worker, now: Date.now() })
+  return Response.json({ setup: s, jobs, worker, sparkUrl: sparkSiteUrl(), now: Date.now() })
 })
 
 type CreateBody = {

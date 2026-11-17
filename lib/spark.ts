@@ -71,6 +71,24 @@ export async function sparkApi(path: string, init: { method?: string; body?: unk
   return { ok: res.ok, status: res.status, data: await parse(res) }
 }
 
+// A file in /workspace on the Spark, as the Spark's file API serves it (any time, session or not).
+export function sparkFileUrl(path: string) {
+  return `${SPARK_URL}/api/lab/files/${path.split('/').filter(Boolean).map(encodeURIComponent).join('/')}`
+}
+
+export function sparkSiteUrl() {
+  return SPARK_URL
+}
+
+// Streams a file from the Spark with the lab token. Range requests pass through, so an interrupted
+// download can resume where the Spark supports it.
+export async function sparkFile(path: string, range: string | null) {
+  return fetch(sparkFileUrl(path), {
+    headers: { Authorization: `Bearer ${labToken()}`, ...(range ? { Range: range } : {}) },
+    cache: 'no-store',
+  })
+}
+
 export const labStatus = () => sparkApi('/api/lab')
 export const bookSession = (start: number, hours: number, note: string) =>
   sparkApi('/api/lab/bookings', { method: 'POST', body: { start, hours, note } })

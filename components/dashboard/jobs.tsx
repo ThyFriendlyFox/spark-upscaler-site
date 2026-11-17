@@ -35,7 +35,17 @@ const STATUS: Record<Job['status'], { label: string; variant: 'default' | 'secon
 
 type Patch = (id: string, change: Partial<Job> | null) => void
 
-function JobRow({ j, now, reload, patch }: { j: Job; now: number; reload: () => void; patch: Patch }) {
+// Results stay on the Spark. The direct link uses your Spark sign-in in this browser; the app route
+// streams it with the lab token instead.
+function downloadLinks(j: Job, sparkUrl?: string) {
+  const out = j.output
+  if (!out) return null
+  const viaApp = `/api/jobs/${j.id}/download`
+  const direct = out.path && sparkUrl ? `${sparkUrl}/api/lab/files/${out.path.split('/').filter(Boolean).map(encodeURIComponent).join('/')}` : null
+  return { direct, viaApp }
+}
+
+function JobRow({ j, now, reload, patch, sparkUrl }: { j: Job; now: number; reload: () => void; patch: Patch; sparkUrl?: string }) {
   const [logOpen, setLogOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const p = j.progress
@@ -52,6 +62,7 @@ function JobRow({ j, now, reload, patch }: { j: Job; now: number; reload: () => 
   const label = live ? (PHASES[p?.phase ?? ''] ?? st.label) : st.label
   const canCancel = j.status === 'queued' || j.status === 'running'
   const canRetry = (j.status === 'failed' || j.status === 'canceled') && !j.input.deleted
+  const links = downloadLinks(j, sparkUrl)
 
   // Optimistic: show the change at once, roll back if the server says no.
   async function act(action: 'cancel' | 'retry' | 'forget-stats') {
@@ -99,9 +110,9 @@ function JobRow({ j, now, reload, patch }: { j: Job; now: number; reload: () => 
           </ItemDescription>
         </ItemContent>
         <ItemActions>
-          {j.output ? (
+          {links ? (
             <Button variant="outline" size="sm" asChild>
-              <a href={`/api/jobs/${j.id}/download`} target="_blank" rel="noreferrer">
+              <a href={links.direct ?? links.viaApp} target="_blank" rel="noreferrer">
                 <Download aria-hidden />
                 Download
               </a>
@@ -122,10 +133,17 @@ function JobRow({ j, now, reload, patch }: { j: Job; now: number; reload: () => 
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              {j.output && (
+              {links?.direct && (
                 <DropdownMenuItem asChild>
-                  <a href={`/api/jobs/${j.id}/download`} target="_blank" rel="noreferrer">
-                    Download
+                  <a href={links.direct} target="_blank" rel="noreferrer">
+                    Download From Spark
+                  </a>
+                </DropdownMenuItem>
+              )}
+              {links && (
+                <DropdownMenuItem asChild>
+                  <a href={links.viaApp} target="_blank" rel="noreferrer">
+                    Download via App
                   </a>
                 </DropdownMenuItem>
               )}
@@ -189,7 +207,11 @@ function JobRow({ j, now, reload, patch }: { j: Job; now: number; reload: () => 
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title={`Delete ${j.name}?`}
-        description="This removes the job and its files. Its timing data stays in the stats."
+        description={
+          j.output?.path
+            ? 'This removes the job here, and the worker deletes the video from the Spark the next time it runs. Its timing data stays in the stats.'
+            : 'This removes the job and its files. Its timing data stays in the stats.'
+        }
         confirmLabel="Delete Job"
         onConfirm={remove}
       />
@@ -197,7 +219,22 @@ function JobRow({ j, now, reload, patch }: { j: Job; now: number; reload: () => 
   )
 }
 
-export function Jobs({ jobs, loading, now, reload, patch }: { jobs: Job[]; loading: boolean; now: number; reload: () => void; patch: Patch }) {
+export function Jobs({
+  jobs,
+  loading,
+  now,
+  reload,
+  patch,
+  sparkUrl,
+}: {
+  jobs: Job[]
+  loading: boolean
+  now: number
+  reload: () => void
+  patch: Patch
+  sparkUrl?: string
+}) {
+  const hasResults = jobs.some((j) => j.output?.path)
   const running = jobs.filter((j) => j.status === 'running' || j.status === 'uploading').length
   const queued = jobs.filter((j) => j.status === 'queued').length
   return (
@@ -231,10 +268,19 @@ export function Jobs({ jobs, loading, now, reload, patch }: { jobs: Job[]; loadi
         <ul className="grid grid-cols-1 gap-3">
           <AnimatePresence initial={false}>
             {jobs.map((j) => (
-              <JobRow key={j.id} j={j} now={now} reload={reload} patch={patch} />
+              <JobRow key={j.id} j={j} now={now} reload={reload} patch={patch} sparkUrl={sparkUrl} />
             ))}
           </AnimatePresence>
         </ul>
+      )}
+      {hasResults && (
+        <p className="mt-4 text-xs text-pretty text-muted-foreground">
+          Results stay on the Spark and download straight from it, so sign in at{' '}
+          <a href={sparkUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">
+            the Spark site
+          </a>{' '}
+          in this browser first. If you can’t, use Download via App in the ⋯ menu; it relays the file through this site and must finish within 5 minutes.
+        </p>
       )}
     </Section>
   )

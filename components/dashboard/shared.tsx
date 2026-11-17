@@ -8,7 +8,7 @@ import type { Job, WorkerStatus } from '@/lib/store'
 import { cn } from '@/lib/utils'
 
 export type Setup = { appPassword: boolean; sparkLabToken: boolean; workerSecret: boolean; blob: boolean; redis: boolean }
-export type JobsResp = { setup: Setup; jobs: Job[]; worker: WorkerStatus | null; now?: number; error?: string }
+export type JobsResp = { setup: Setup; jobs: Job[]; worker: WorkerStatus | null; sparkUrl?: string; now?: number; error?: string }
 export type LabResp = { lab: { ok: boolean; status: number; data: LabData | string | null }; workerLog: string[]; startCommand: string | null }
 export type StatsResp = { chunks: ChunkStat[]; jobs: JobStat[]; fits: FitSet }
 

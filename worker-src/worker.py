@@ -3,11 +3,12 @@
 
 Runs inside a Spark lab session. It asks the web app for queued clips, runs
 SeedVR2 (numz/ComfyUI-SeedVR2_VideoUpscaler CLI) on them in resumable chunks,
-uploads the result to the app's Blob storage, and reports timing for every
-chunk so the app can estimate future jobs.
+keeps the result on the Spark, and reports timing for every chunk so the app
+can estimate future jobs.
 
 Everything lives under /workspace/upscaler, which survives between sessions:
-code, models, pip installs and half-finished jobs. If a session ends mid-job,
+code, models, pip installs, half-finished jobs and finished videos
+(outputs/<job>/), which the app downloads straight from the Spark. If a session ends mid-job,
 start the worker again next session and it continues from the last finished
 chunk.
 
@@ -38,7 +39,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 BASE = Path(os.environ.get("SU_BASE", "/workspace/upscaler"))
 CONFIG = BASE / "config.json"
 LOCK = BASE / "worker.pid"
@@ -48,6 +49,10 @@ SEEDVR2_COMMIT = "4490bd1f482e026674543386bb2a4d176da245b9"
 MODELS_DIR = BASE / "models"
 BIN = BASE / "bin"
 JOBS = BASE / "jobs"
+# Finished videos stay on the Spark. The app downloads them through the Spark's file API, whose paths are
+# relative to /workspace.
+OUTPUTS = BASE / "outputs"
+WORKSPACE = Path(os.environ.get("SU_WORKSPACE", "/workspace"))
 POLL_SECONDS = 20
 PROGRESS_SECONDS = 15
 FFMPEG_ARM64 = "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz"
@@ -141,15 +146,37 @@ def heartbeat_loop():
                 "jobId": STATE["job"],
                 "env": STATE["env"],
                 "log": take_log(),
+                "trashed": STATE.get("trashed", []),
             }, timeout=30, retries=2)
+            STATE["trashed"] = []
             if r.get("cancel"):
                 STATE["cancel"] = True
+            for rel in r.get("trash") or []:
+                STATE.setdefault("trashed", []).append(rel)
+                delete_output(rel)
         except Exception as e:
             print(f"heartbeat failed: {e}", flush=True)
         time.sleep(30)
 
 
 # ---------------------------------------------------------------- helpers
+
+def delete_output(rel):
+    """Deletes a finished video the app no longer lists. Only ever touches files under outputs/."""
+    try:
+        target = (WORKSPACE / rel).resolve()
+        root = OUTPUTS.resolve()
+        if root not in target.parents:
+            log(f"refusing to delete outside outputs/: {rel}")
+            return
+        if target.exists():
+            target.unlink()
+            log(f"deleted {rel}")
+        if target.parent != root and target.parent.exists() and not any(target.parent.iterdir()):
+            target.parent.rmdir()
+    except Exception as e:
+        log(f"could not delete {rel}: {e}")
+
 
 def run(cmd, cwd=None, check=True, env=None, timeout=None):
     log("$ " + " ".join(shlex.quote(str(c)) for c in cmd))
@@ -484,91 +511,13 @@ def video_dims(path):
     return w, h, n
 
 
-# ---------------------------------------------------------------- blob upload
-
-def blob_upload(path, tok):
-    """Uploads a file with a client token, the same HTTP calls @vercel/blob makes."""
-    token = tok["token"]
-    store_id = token.split("_")[3]
-    api_url = tok.get("apiUrl", "https://vercel.com/api/blob")
-    q = urllib.parse.urlencode({"pathname": tok["pathname"]})
-    base_headers = {
-        "authorization": f"Bearer {token}",
-        "x-api-version": tok.get("apiVersion", "13"),
-        "x-vercel-blob-store-id": store_id,
-        "x-content-type": "video/mp4" if str(path).endswith(".mp4") else "application/octet-stream",
-        "user-agent": f"spark-upscaler-worker/{VERSION}",
-    }
-    base_headers.update(tok.get("headers", {}))
-    size = os.path.getsize(path)
-    part_size = int(tok.get("partSize", 32 * 1024 * 1024))
-
-    def call(method, url, headers, data, timeout=600):
-        last = None
-        for attempt in range(5):
-            req = urllib.request.Request(url, data=data, method=method, headers=headers)
-            try:
-                with urllib.request.urlopen(req, timeout=timeout) as r:
-                    return json.loads(r.read() or b"{}")
-            except urllib.error.HTTPError as e:
-                body = e.read().decode(errors="replace")[:500]
-                last = RuntimeError(f"blob {method} HTTP {e.code}: {body}")
-                if e.code in (400, 401, 403, 404, 409, 413):
-                    raise last
-            except Exception as e:
-                last = e
-            time.sleep(3 * (attempt + 1))
-        raise last
-
-    if size <= part_size:
-        with open(path, "rb") as f:
-            data = f.read()
-        return call("PUT", f"{api_url}/?{q}", base_headers, data)
-
-    created = call("POST", f"{api_url}/mpu?{q}", {**base_headers, "x-mpu-action": "create"}, None)
-    key, upload_id = created["key"], created["uploadId"]
-    parts = []
-    with open(path, "rb") as f:
-        n = 0
-        while True:
-            data = f.read(part_size)
-            if not data:
-                break
-            n += 1
-            r = call("POST", f"{api_url}/mpu?{q}", {
-                **base_headers,
-                "x-mpu-action": "upload",
-                "x-mpu-key": urllib.parse.quote(key, safe=""),
-                "x-mpu-upload-id": upload_id,
-                "x-mpu-part-number": str(n),
-            }, data)
-            parts.append({"partNumber": n, "etag": r["etag"]})
-            log(f"upload: part {n}/{(size + part_size - 1) // part_size}")
-    return call("POST", f"{api_url}/mpu?{q}", {
-        **base_headers,
-        "content-type": "application/json",
-        "x-mpu-action": "complete",
-        "x-mpu-upload-id": upload_id,
-        "x-mpu-key": urllib.parse.quote(key, safe=""),
-    }, json.dumps(parts).encode())
-
+# ---------------------------------------------------------------- self-test
 
 def selftest():
-    """Round-trips a small file through Blob storage to prove uploads work."""
+    """Checks the app and its storage answer, since inputs come from there."""
     r = api("POST", "/api/worker/selftest", {"action": "server"})
-    log(f"selftest server round trip: {r}")
-    tok = api("POST", "/api/worker/selftest", {"action": "token"})
-    p = BASE / "selftest.bin"
-    data = os.urandom(40 * 1024 * 1024 + 12345)  # > one part, so multipart is exercised
-    p.write_bytes(data)
-    tok["partSize"] = 16 * 1024 * 1024
-    res = blob_upload(p, tok)
-    import hashlib
-    v = api("POST", "/api/worker/selftest", {"action": "verify", "pathname": res.get("pathname", tok["pathname"])})
-    ok = v.get("sha256") == hashlib.sha256(data).hexdigest()
-    p.unlink(missing_ok=True)
-    log(f"selftest worker upload: {'ok' if ok else 'MISMATCH'} {v}")
-    return ok
+    log(f"selftest: {r}")
+    return bool(r.get("ok"))
 
 
 # ---------------------------------------------------------------- jobs
@@ -771,17 +720,21 @@ def process_job(job, input_url):
              "-movflags", "+faststart", final])
     timings["join"] = round(time.time() - t, 1)
 
-    set_state("working", f"{job['name']}: uploading")
-    report(jid, "progress", {"phase": "uploading", "status": "uploading"})
-    t = time.time()
-    size = final.stat().st_size
-    tok = api("POST", f"/api/worker/jobs/{jid}/upload-token", {"workerId": WORKER_ID, "size": size})
-    res = blob_upload(final, tok)
-    timings["upload"] = round(time.time() - t, 1)
+    # Keep the result on the Spark; the app downloads it from there.
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(job.get("name") or "video").stem)[:80] or "video"
+    out_dir = OUTPUTS / jid
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{stem}_seedvr2_{job['settings']['resolution']}p.mp4"
+    shutil.move(str(final), out)
+    size = out.stat().st_size
+    try:
+        rel = str(out.resolve().relative_to(WORKSPACE.resolve()))
+    except ValueError:
+        rel = str(out.resolve())  # outside /workspace: only reachable from a session
     timings["wall"] = round(time.time() - t_start, 1)
     api("POST", f"/api/worker/jobs/{jid}/complete", {
         "workerId": WORKER_ID,
-        "output": {"pathname": res.get("pathname", tok["pathname"]), "url": res["url"], "size": size},
+        "output": {"path": rel, "size": size},
         "timings": timings,
         "dryRun": DRY_RUN,
         "chunks": n_chunks,
@@ -877,11 +830,11 @@ def main():
     try:
         setup()
         if "--skip-selftest" not in sys.argv and not (BASE / ".selftest-ok").exists():
-            set_state("setup", "testing uploads to Blob storage")
+            set_state("setup", "checking the connection to the app")
             if selftest():
                 (BASE / ".selftest-ok").write_text(VERSION)
             else:
-                raise RuntimeError("Blob upload self-test failed; see the log")
+                raise RuntimeError("Self-test failed; see the log")
     except Exception as e:
         set_state("error", f"setup failed: {e}"[:1900])
         traceback.print_exc()

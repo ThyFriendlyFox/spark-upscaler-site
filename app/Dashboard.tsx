@@ -127,7 +127,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
           <div className="grid min-w-0 grid-cols-1 gap-6 lg:col-span-7">
             <NewJob fits={stats?.fits ?? null} storageReady={!!setup?.blob && !!setup?.redis} onCreated={loadJobs} />
-            <Jobs jobs={jobs} loading={!data} now={now} reload={loadJobs} patch={patch} />
+            <Jobs jobs={jobs} loading={!data} now={now} reload={loadJobs} patch={patch} sparkUrl={data?.sparkUrl} />
           </div>
           <div className="grid min-w-0 grid-cols-1 gap-6 lg:col-span-5">
             <SparkPanel lab={lab} worker={worker} workerOnline={workerOnline} now={now} reload={loadLab} />

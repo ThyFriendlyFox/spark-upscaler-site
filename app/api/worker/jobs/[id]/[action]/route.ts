@@ -1,5 +1,5 @@
 import { requireWorker } from '@/lib/auth'
-import { deleteBlobs, workerUploadToken } from '@/lib/blob'
+import { deleteBlobs } from '@/lib/blob'
 import { type ChunkStat, workUnits } from '@/lib/estimate'
 import { HttpError, readJson, route } from '@/lib/http'
 import { addChunkStat, addJobStat, mustGetJob, saveJob, type Job } from '@/lib/store'
@@ -81,20 +81,14 @@ export const POST = route<Ctx>(async (req, { params }) => {
       return Response.json({ ok: true, cancel })
     }
 
-    case 'upload-token': {
-      const size = num(body.size)
-      const base = job.name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80) || 'video'
-      const pathname = `outputs/${id}/${base}_seedvr2_${job.settings.resolution}p.mp4`
-      return Response.json(await workerUploadToken(pathname, Math.max(size * 2, 64 * 1024 ** 2)))
-    }
-
     case 'complete': {
-      const out = (body.output ?? {}) as { pathname?: string; url?: string; size?: number }
-      if (!out.pathname || !out.url) throw new HttpError(400, 'Missing output')
+      // The result stays on the Spark; `path` is relative to /workspace there.
+      const out = (body.output ?? {}) as { path?: string; size?: number }
+      if (!out.path || out.path.includes('..')) throw new HttpError(400, 'Missing output path')
       const timings = (body.timings ?? {}) as Record<string, number>
       const wall = num(timings.wall)
       const chunkSeconds = num(timings.chunks)
-      job.output = { pathname: out.pathname, url: out.url, size: num(out.size) }
+      job.output = { path: out.path, size: num(out.size) }
       job.status = 'done'
       job.finishedAt = now
       job.timings = timings
@@ -123,7 +117,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
         estimateSeconds: job.estimate?.seconds ?? null,
         outputBytes: num(out.size) || null,
       })
-      // Free Blob space (Hobby includes 1 GB): the input isn't needed once the output exists.
+      // The input upload isn't needed once the result exists.
       if (!job.input.deleted) {
         await deleteBlobs([job.input.url])
         job.input.deleted = true

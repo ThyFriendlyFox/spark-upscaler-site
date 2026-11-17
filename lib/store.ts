@@ -10,6 +10,7 @@ const K = {
   jobStats: `${P}stats:jobs`,
   worker: `${P}worker`,
   workerLog: `${P}worker:log`,
+  trash: `${P}trash`,
 }
 
 export type JobStatus = 'queued' | 'running' | 'uploading' | 'done' | 'failed' | 'canceled'
@@ -22,7 +23,8 @@ export type Job = {
   size: number
   contentType: string
   input: { pathname: string; url: string; deleted?: boolean }
-  output?: { pathname: string; url: string; size: number }
+  // `path` (relative to /workspace on the Spark) for results kept on the Spark; pathname/url for old Blob results.
+  output?: { path?: string; pathname?: string; url?: string; size: number }
   meta: Meta
   settings: Settings
   estimate: Estimate
@@ -153,6 +155,19 @@ export async function pushWorkerLog(lines: string[]) {
   const r = redis()
   await r.rpush(K.workerLog, ...lines.slice(-200))
   await r.ltrim(K.workerLog, -300, -1)
+}
+
+// Finished videos to remove from the Spark. The Spark's file API is read-only, so the worker deletes them.
+export async function addTrash(paths: string[]) {
+  if (paths.length) await redis().sadd(K.trash, paths[0], ...paths.slice(1))
+}
+
+export async function getTrash(limit = 50) {
+  return (await redis().smembers(K.trash)).slice(0, limit)
+}
+
+export async function removeTrash(paths: string[]) {
+  if (paths.length) await redis().srem(K.trash, ...paths)
 }
 
 export async function getWorkerLog() {
